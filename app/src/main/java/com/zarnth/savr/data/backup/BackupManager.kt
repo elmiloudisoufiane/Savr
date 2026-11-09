@@ -1,14 +1,18 @@
 package com.zarnth.savr.data.backup
 
-import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
+import android.content.Intent
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
+import androidx.room.withTransaction
+import androidx.work.BackoffPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequest
+import androidx.work.WorkManager
 import com.zarnth.savr.data.local.BackupBookmark
 import com.zarnth.savr.data.local.BackupCollection
 import com.zarnth.savr.data.local.BackupData
+import com.zarnth.savr.data.local.BookmarkDatabase
 import com.zarnth.savr.link_fetcher.LinkMetadataParser
 import com.zarnth.savr.data.local.dao.BookmarkDao
 import com.zarnth.savr.data.local.dao.CollectionDao
@@ -16,164 +20,291 @@ import com.zarnth.savr.data.local.entity.BookmarkCollectionCrossRef
 import com.zarnth.savr.data.local.entity.BookmarkEntity
 import com.zarnth.savr.data.local.entity.CollectionEntity
 import com.zarnth.savr.domain.repository.SettingsRepository
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
+import java.io.IOException
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class BackupManager(
     private val bookmarkDao: BookmarkDao,
     private val collectionDao: CollectionDao,
     private val settingsRepository: SettingsRepository,
-    private val context: Context
+    private val context: Context,
+    private val database: BookmarkDatabase
 ) {
     companion object {
-        private const val FILE_NAME = "savr_autobackup.json"
-        private const val BACKUP_DIR = "backups"
+        const val BACKUP_PREFIX = "savr_backup_"
+        const val SAFETY_PREFIX = "savr_prerestore_"
+        private const val EXTENSION = ".json"
+        private const val TIMESTAMP_PATTERN = "yyyyMMdd_HHmmss"
+        private const val SAFETY_COPIES_TO_KEEP = 3
+        private const val WORK_NAME = "savr_hourly_backup"
+        private val TIMESTAMP_IN_NAME = Regex("\\d{8}_\\d{6}")
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var autoBackupJob: Job? = null
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
-    private val _lastBackupTimeMillis = MutableStateFlow(0L)
+    private val backupMutex = Mutex()
+
+    private val _lastBackupTimeMillis = MutableStateFlow(settingsRepository.getLastBackupTime())
     val lastBackupTimeMillis: StateFlow<Long> = _lastBackupTimeMillis.asStateFlow()
+
+    private val _lastError = MutableStateFlow(settingsRepository.getLastBackupError())
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
     init {
         if (settingsRepository.getAutoBackupEnabled()) {
-            refreshLastBackupTime()
-            startAutoBackup()
+            scheduleHourlyBackup()
         }
     }
 
-    fun refreshLastBackupTime() {
-        val file = getInternalFile()
-        _lastBackupTimeMillis.value = if (file.exists()) file.lastModified() else 0L
+    // ---------------------------------------------------------------- scheduling
+
+    fun enableAutoBackup() {
+        settingsRepository.setAutoBackupEnabled(true)
+        scheduleHourlyBackup()
     }
 
-    private fun getInternalFile(): File {
-        return File(File(context.filesDir, BACKUP_DIR), FILE_NAME)
+    fun disableAutoBackup() {
+        settingsRepository.setAutoBackupEnabled(false)
+        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
 
-    fun startAutoBackup() {
-        stopAutoBackup()
-        autoBackupJob = scope.launch {
-            combine(
-                bookmarkDao.getAllBookmarksForBackup(),
-                collectionDao.getAllCollectionsRaw()
-            ) { bookmarks, collections ->
-                val backupBookmarks = bookmarks.map { BackupBookmark(url = it.url, title = it.title, description = it.description, imageUrl = it.imageUrl, createdAt = it.createdAt, isCollectionOnly = it.isCollectionOnly, isPinned = it.isPinned, pinnedAt = it.pinnedAt) }
-                val backupCollections = buildBackupCollections(collections)
-                BackupData(bookmarks = backupBookmarks, collections = backupCollections)
+    private fun scheduleHourlyBackup() {
+        val request = PeriodicWorkRequest.Builder(BackupWorker::class.java, 1, TimeUnit.HOURS)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+
+    // ---------------------------------------------------------------- folder
+
+    fun hasBackupFolder(): Boolean = settingsRepository.getBackupFolderUri() != null
+
+    fun getBackupFolderName(): String? {
+        val uri = settingsRepository.getBackupFolderUri() ?: return null
+        return runCatching { DocumentFile.fromTreeUri(context, Uri.parse(uri))?.name }.getOrNull()
+    }
+
+    fun setBackupFolder(uri: Uri) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        context.contentResolver.takePersistableUriPermission(uri, flags)
+        val old = settingsRepository.getBackupFolderUri()
+        if (old != null && old != uri.toString()) {
+            runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(old), flags) }
+        }
+        settingsRepository.setBackupFolderUri(uri.toString())
+        // Force a fresh backup into the new folder on the next run.
+        settingsRepository.setLastBackupHash(null)
+        settingsRepository.setLastBackupError(null)
+        _lastError.value = null
+    }
+
+    private fun backupDir(): DocumentFile? {
+        val uri = settingsRepository.getBackupFolderUri() ?: return null
+        val dir = runCatching { DocumentFile.fromTreeUri(context, Uri.parse(uri)) }.getOrNull() ?: return null
+        return if (dir.exists() && dir.canWrite()) dir else null
+    }
+
+    private fun listFiles(dir: DocumentFile, prefix: String): List<DocumentFile> =
+        dir.listFiles()
+            .filter { f ->
+                val name = f.name
+                f.isFile && name != null && name.startsWith(prefix) && name.endsWith(EXTENSION)
             }
-                .debounce(500)
-                .collect { data ->
-                    if (data.bookmarks.isNotEmpty() || data.collections.isNotEmpty()) {
-                        val jsonString = json.encodeToString(data)
-                        writeToBothLocations(jsonString)
-                    }
-                }
-        }
+            .sortedByDescending { it.name }
+
+    /** Backups (and pre-restore safety copies) in the chosen folder, newest first. */
+    fun listBackups(): List<BackupFileInfo> {
+        val dir = backupDir() ?: return emptyList()
+        val regular = listFiles(dir, BACKUP_PREFIX).map { toInfo(it, isSafety = false) }
+        val safety = listFiles(dir, SAFETY_PREFIX).map { toInfo(it, isSafety = true) }
+        return (regular + safety).sortedByDescending { it.timeMillis }
     }
 
-    fun stopAutoBackup() {
-        autoBackupJob?.cancel()
-        autoBackupJob = null
+    private fun toInfo(file: DocumentFile, isSafety: Boolean): BackupFileInfo {
+        val name = file.name.orEmpty()
+        return BackupFileInfo(
+            name = name,
+            uri = file.uri.toString(),
+            timeMillis = timeFromName(name) ?: file.lastModified(),
+            sizeBytes = file.length(),
+            isSafetyCopy = isSafety
+        )
     }
 
-    private fun writeToBothLocations(jsonString: String) {
-        val backupDir = File(context.filesDir, BACKUP_DIR)
-        backupDir.mkdirs()
-        val internalFile = File(backupDir, FILE_NAME)
-        internalFile.writeText(jsonString)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            writeToDownloads(jsonString)
-        }
-
-        _lastBackupTimeMillis.value = System.currentTimeMillis()
+    private fun timeFromName(name: String): Long? {
+        val stamp = TIMESTAMP_IN_NAME.find(name)?.value ?: return null
+        return runCatching { SimpleDateFormat(TIMESTAMP_PATTERN, Locale.US).parse(stamp)?.time }.getOrNull()
     }
 
-    @SuppressLint("NewApi")
-    private fun writeToDownloads(jsonString: String) {
-        val resolver = context.contentResolver
-        val bytes = jsonString.toByteArray()
+    private fun timestampNow(): String = SimpleDateFormat(TIMESTAMP_PATTERN, Locale.US).format(Date())
 
-        deleteAllBackupEntries(resolver)
+    // ---------------------------------------------------------------- backup
 
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME)
-            put(MediaStore.Downloads.MIME_TYPE, "application/json")
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Savr")
-            put(MediaStore.Downloads.IS_PENDING, 1)
+    /**
+     * Writes a new backup file into the chosen folder, unless nothing changed since the
+     * last one (so quiet hours don't push useful older versions out of the retention window).
+     */
+    suspend fun backupNow(): BackupResult = backupMutex.withLock {
+        withContext(Dispatchers.IO) { performBackup() }
+    }
+
+    private suspend fun performBackup(): BackupResult {
+        val dir = backupDir()
+        if (dir == null) {
+            return fail(
+                if (hasBackupFolder()) "The backup folder is not accessible. Choose it again."
+                else "Choose a backup folder first."
+            )
         }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-        uri?.let {
-            runCatching {
-                resolver.openOutputStream(it)?.use { output ->
-                    output.write(bytes)
-                }
-                val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-                resolver.update(it, done, null, null)
+        try {
+            val data = buildBackupData()
+            // Never overwrite good backups with an empty snapshot.
+            if (data.bookmarks.isEmpty() && data.collections.isEmpty()) {
+                return BackupResult.NothingToBackUp
             }
-        }
-    }
 
-    @SuppressLint("NewApi")
-    private fun deleteAllBackupEntries(resolver: android.content.ContentResolver) {
-        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/Savr/"
-        val projection = arrayOf(MediaStore.Downloads._ID)
-        val selection =
-            "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
-        val selectionArgs = arrayOf(relativePath, "savr_autobackup%.json")
-        runCatching {
-            resolver.query(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                null
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    runCatching {
-                        resolver.delete(
-                            MediaStore.Downloads.EXTERNAL_CONTENT_URI.buildUpon()
-                                .appendPath(id.toString()).build(),
-                            null, null
-                        )
-                    }
-                }
+            val hash = contentHash(data)
+            val hasExisting = listFiles(dir, BACKUP_PREFIX).isNotEmpty()
+            if (hasExisting && hash == settingsRepository.getLastBackupHash()) {
+                markUpToDate()
+                return BackupResult.Unchanged
             }
+
+            val name = "$BACKUP_PREFIX${timestampNow()}$EXTENSION"
+            writeFile(dir, name, json.encodeToString(data))
+            settingsRepository.setLastBackupHash(hash)
+            prune(dir, BACKUP_PREFIX, settingsRepository.getBackupRetention())
+            markUpToDate()
+            return BackupResult.Created(name)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return fail(e.message ?: "Backup failed")
         }
     }
 
-    fun readInternalBackup(): String? {
-        val file = getInternalFile()
-        return if (file.exists()) file.readText() else null
+    private fun fail(message: String): BackupResult {
+        settingsRepository.setLastBackupError(message)
+        _lastError.value = message
+        return BackupResult.Failed(message)
     }
 
-    suspend fun generateBackupJson(): String {
+    private fun markUpToDate() {
+        val now = System.currentTimeMillis()
+        settingsRepository.setLastBackupTime(now)
+        settingsRepository.setLastBackupError(null)
+        _lastBackupTimeMillis.value = now
+        _lastError.value = null
+    }
+
+    private fun writeFile(dir: DocumentFile, name: String, content: String) {
+        val file = dir.createFile("application/json", name)
+            ?: throw IOException("Could not create a file in the backup folder")
+        try {
+            val out = context.contentResolver.openOutputStream(file.uri, "w")
+                ?: throw IOException("Could not write to the backup folder")
+            out.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+        } catch (e: Exception) {
+            runCatching { file.delete() }
+            throw e
+        }
+    }
+
+    private fun prune(dir: DocumentFile, prefix: String, keep: Int) {
+        listFiles(dir, prefix).drop(keep.coerceAtLeast(1)).forEach { runCatching { it.delete() } }
+    }
+
+    private fun contentHash(data: BackupData): String {
+        val canonical = data.copy(
+            exportedAt = 0L,
+            bookmarks = data.bookmarks.sortedWith(compareBy({ it.url }, { it.createdAt })),
+            collections = data.collections
+                .sortedBy { it.name }
+                .map { it.copy(bookmarkUrls = it.bookmarkUrls.sorted()) }
+        )
+        val bytes = MessageDigest.getInstance("SHA-256")
+            .digest(json.encodeToString(canonical).toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    // ---------------------------------------------------------------- restore
+
+    /**
+     * Replaces ALL current bookmarks and collections with the contents of the given backup.
+     * The backup is validated first, and a safety copy of the current data is written to the
+     * backup folder before anything is deleted. The replace runs in a single DB transaction,
+     * so a failure leaves the current data untouched.
+     *
+     * @return true if a safety copy of the previous data was saved.
+     */
+    suspend fun restoreFromBackup(uriString: String): Boolean = backupMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val text = context.contentResolver.openInputStream(Uri.parse(uriString))
+                ?.use { it.readBytes().toString(Charsets.UTF_8) }
+                ?: throw IOException("Could not read the selected backup")
+
+            val parsed = json.decodeFromString<BackupData>(text)
+            if (parsed.bookmarks.isEmpty() && parsed.collections.isEmpty()) {
+                throw IOException("This backup is empty. Nothing was changed.")
+            }
+
+            var safetyCopySaved = false
+            val current = buildBackupData()
+            if (current.bookmarks.isNotEmpty() || current.collections.isNotEmpty()) {
+                val dir = backupDir() ?: throw IOException("The backup folder is not accessible")
+                writeFile(dir, "$SAFETY_PREFIX${timestampNow()}$EXTENSION", json.encodeToString(current))
+                prune(dir, SAFETY_PREFIX, SAFETY_COPIES_TO_KEEP)
+                safetyCopySaved = true
+            }
+
+            database.withTransaction {
+                collectionDao.deleteAllCrossRefs()
+                collectionDao.deleteAllCollections()
+                bookmarkDao.deleteAllBookmarks()
+                importFromJson(text)
+            }
+            safetyCopySaved
+        }
+    }
+
+    // ---------------------------------------------------------------- export / import helpers
+
+    private suspend fun buildBackupData(): BackupData {
         val bookmarks = bookmarkDao.getAllBookmarksForBackupOnce()
-        val collections = collectionDao.getAllCollectionsRaw().first()
-
-        val backupBookmarks = bookmarks.map { BackupBookmark(url = it.url, title = it.title, description = it.description, imageUrl = it.imageUrl, createdAt = it.createdAt, isCollectionOnly = it.isCollectionOnly, isPinned = it.isPinned, pinnedAt = it.pinnedAt) }
-        val backupCollections = buildBackupCollections(collections)
-
-        val data = BackupData(bookmarks = backupBookmarks, collections = backupCollections)
-        return json.encodeToString(data)
+        val collections = collectionDao.getAllCollectionsOnce()
+        return BackupData(
+            bookmarks = bookmarks.map {
+                BackupBookmark(
+                    url = it.url,
+                    title = it.title,
+                    description = it.description,
+                    imageUrl = it.imageUrl,
+                    createdAt = it.createdAt,
+                    isCollectionOnly = it.isCollectionOnly,
+                    isPinned = it.isPinned,
+                    pinnedAt = it.pinnedAt
+                )
+            },
+            collections = buildBackupCollections(collections)
+        )
     }
+
+    suspend fun generateBackupJson(): String = json.encodeToString(buildBackupData())
 
     private suspend fun buildBackupCollections(collections: List<CollectionEntity>): List<BackupCollection> {
         val byId = collections.associateBy { it.id }
@@ -371,7 +502,7 @@ class BackupManager(
             ensureBookmark(b.url, b)
         }
 
-        val existingCollections = collectionDao.getAllCollectionsRaw().first().associateBy { it.name }
+        val existingCollections = collectionDao.getAllCollectionsOnce().associateBy { it.name }
         val collectionNameToId = existingCollections.mapValues { it.value.id }.toMutableMap()
 
         suspend fun restoreCollection(c: BackupCollection) {

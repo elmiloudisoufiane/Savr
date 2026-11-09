@@ -25,11 +25,12 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.zarnth.savr"
+        applicationId = "com.zarnth.savr.hourly"
         minSdk = 28
         targetSdk = 36
         versionCode = releaseVersionCode
         versionName = releaseVersionName
+        versionNameSuffix = "-hourly"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -109,5 +110,9 @@ dependencies {
     implementation("io.insert-koin:koin-android")
     implementation("io.insert-koin:koin-androidx-compose")
     implementation("androidx.browser:browser:1.10.0")
+
+    // Hourly backup: periodic background work + folder access (SAF)
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
 }

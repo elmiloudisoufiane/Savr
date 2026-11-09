@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zarnth.savr.R
+import com.zarnth.savr.data.backup.formatBackupTime
 import com.zarnth.savr.presentation.setting.SettingEvents
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -16,7 +17,8 @@ import com.zarnth.savr.presentation.setting.SettingViewModel
 @Composable
 fun DataSection(
     state: SettingState,
-    viewModel: SettingViewModel
+    viewModel: SettingViewModel,
+    onPickFolder: () -> Unit
 ) {
     Spacer(Modifier.height(12.dp))
     SectionHeader("Data")
@@ -36,11 +38,14 @@ fun DataSection(
     Spacer(Modifier.height(4.dp))
     SettingItem(
         icon = R.drawable.backup_icon,
-        title = "Auto backup",
+        title = "Hourly auto backup",
         subtitle = if (state.autoBackupEnabled) {
-            val time = state.lastBackupTimeText
-            if (time.isNotEmpty()) "$time\n/storage/Download/Savr/savr_autobackup.json"
-            else "No backup yet\n/storage/Download/Savr/savr_autobackup.json"
+            val status = when {
+                state.backupError != null -> "Problem: ${state.backupError}"
+                state.lastBackupTimeText.isNotEmpty() -> state.lastBackupTimeText
+                else -> "No backup yet"
+            }
+            "Keeps the last ${state.backupRetention} backups\n$status"
         } else "Off",
         trailing = {
             Switch(
@@ -53,5 +58,42 @@ fun DataSection(
             )
         },
         onClick = { viewModel.onEvent(SettingEvents.ToggleAutoBackup(!state.autoBackupEnabled)) }
+    )
+    Spacer(Modifier.height(4.dp))
+    SettingItem(
+        icon = R.drawable.backup_db,
+        title = "Backup folder",
+        subtitle = state.backupFolderName
+            ?: if (state.hasBackupFolder) "Folder not accessible. Tap to choose again" else "Not set. Tap to choose",
+        onClick = onPickFolder
+    )
+    Spacer(Modifier.height(4.dp))
+    SettingItem(
+        icon = R.drawable.backup_db,
+        title = "Backups to keep",
+        subtitle = "${state.backupRetention} (older ones are deleted automatically)",
+        onClick = { viewModel.onEvent(SettingEvents.ShowRetentionSheet) }
+    )
+    Spacer(Modifier.height(4.dp))
+    SettingItem(
+        icon = R.drawable.backup_icon,
+        title = "Back up now",
+        subtitle = "Save a copy to the backup folder",
+        onClick = { viewModel.onEvent(SettingEvents.BackupNow) }
+    )
+    Spacer(Modifier.height(4.dp))
+    val latestBackup = state.backups.firstOrNull { !it.isSafetyCopy }
+    SettingItem(
+        icon = R.drawable.import_icon,
+        title = "Restore latest backup",
+        subtitle = latestBackup?.let { formatBackupTime(it.timeMillis) } ?: "No backups found",
+        onClick = { viewModel.onEvent(SettingEvents.RestoreLatest) }
+    )
+    Spacer(Modifier.height(4.dp))
+    SettingItem(
+        icon = R.drawable.import_icon,
+        title = "Choose a backup to restore",
+        subtitle = "Pick an older version",
+        onClick = { viewModel.onEvent(SettingEvents.ShowRestoreList) }
     )
 }

@@ -12,6 +12,7 @@ import androidx.compose.ui.text.withStyle
 
 @Composable
 fun AutoBackupInfoDialog(
+    hasFolder: Boolean,
     onEnable: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -19,7 +20,7 @@ fun AutoBackupInfoDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Enable Auto Backup?",
+                text = "Enable hourly backup?",
                 style = MaterialTheme.typography.titleLarge
             )
         },
@@ -27,21 +28,21 @@ fun AutoBackupInfoDialog(
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                        append("Auto backup mirrors your current bookmarks.\n\n")
+                        append("Savr saves a copy of your bookmarks about once an hour.\n\n")
                     }
-                    append("If you delete bookmarks in the app, they are also removed from the auto-backup.\n\n")
-                    append("Use ")
-                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                        append("Backup Bookmarks")
+                    append("A new copy is only created when something changed, and copies beyond your limit are deleted automatically. ")
+                    append("Android may delay backups to save battery, so the timing is approximate.\n\n")
+                    append("Backups stay in a folder on your device. Nothing is uploaded.")
+                    if (!hasFolder) {
+                        append("\n\nNext, you will choose the backup folder.")
                     }
-                    append(" in Settings, Data section to save a permanent copy before deleting anything.")
                 },
                 style = MaterialTheme.typography.bodyMedium
             )
         },
         confirmButton = {
             TextButton(onClick = onEnable) {
-                Text("Enable")
+                Text(if (hasFolder) "Enable" else "Choose folder")
             }
         },
         dismissButton = {

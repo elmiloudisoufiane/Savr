@@ -87,4 +87,7 @@ interface BookmarkDao {
         }
         return true
     }
+
+    @Query("DELETE FROM bookmarks")
+    suspend fun deleteAllBookmarks()
 }

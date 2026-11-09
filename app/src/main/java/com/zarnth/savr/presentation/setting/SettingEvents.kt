@@ -1,5 +1,7 @@
 package com.zarnth.savr.presentation.setting
 
+import android.net.Uri
+import com.zarnth.savr.data.backup.BackupFileInfo
 import com.zarnth.savr.ui.theme.ThemeMode
 
 sealed class SettingEvents {
@@ -30,4 +32,17 @@ sealed class SettingEvents {
     object ShowImportSheet : SettingEvents()
     object HideImportSheet : SettingEvents()
     object TestCrash : SettingEvents()
+    data class BackupFolderSelected(val uri: Uri, val enableAfter: Boolean) : SettingEvents()
+    object BackupNow : SettingEvents()
+    object DismissBackupMessage : SettingEvents()
+    object RefreshBackups : SettingEvents()
+    object ShowRetentionSheet : SettingEvents()
+    object HideRetentionSheet : SettingEvents()
+    data class SelectRetention(val count: Int) : SettingEvents()
+    object RestoreLatest : SettingEvents()
+    object ShowRestoreList : SettingEvents()
+    object HideRestoreList : SettingEvents()
+    data class RequestRestore(val backup: BackupFileInfo) : SettingEvents()
+    object CancelRestore : SettingEvents()
+    object ConfirmRestore : SettingEvents()
 }

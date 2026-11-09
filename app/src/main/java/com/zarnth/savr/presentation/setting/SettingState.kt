@@ -1,5 +1,6 @@
 package com.zarnth.savr.presentation.setting
 
+import com.zarnth.savr.data.backup.BackupFileInfo
 import com.zarnth.savr.ui.theme.ThemeMode
 
 enum class TapAction { SHOW_PREVIEW, OPEN_BROWSER, COPY_LINK }
@@ -40,6 +41,16 @@ data class SettingState(
     val quickSaveEnabled: Boolean = false,
     val lastBackupTimeText: String = "",
     val showAutoBackupInfoDialog: Boolean = false,
+    val hasBackupFolder: Boolean = false,
+    val backupFolderName: String? = null,
+    val backupRetention: Int = 7,
+    val showRetentionSheet: Boolean = false,
+    val backupError: String? = null,
+    val backupMessage: String? = null,
+    val backups: List<BackupFileInfo> = emptyList(),
+    val showRestoreList: Boolean = false,
+    val pendingRestore: BackupFileInfo? = null,
+    val isBusy: Boolean = false,
     val exportState: ExportState = ExportState.Idle,
     val importState: ImportState = ImportState.Idle,
     val browserImportState: BrowserImportState = BrowserImportState.Idle,

@@ -134,4 +134,13 @@ interface CollectionDao {
         ORDER BY b.createdAt DESC
     """)
     suspend fun searchBookmarksInCollection(collectionId: Long, searchQuery: String): List<BookmarkWithCollectionPin>
+
+    @Query("SELECT * FROM collections ORDER BY createdAt DESC")
+    suspend fun getAllCollectionsOnce(): List<CollectionEntity>
+
+    @Query("DELETE FROM bookmark_collection_cross_ref")
+    suspend fun deleteAllCrossRefs()
+
+    @Query("DELETE FROM collections")
+    suspend fun deleteAllCollections()
 }

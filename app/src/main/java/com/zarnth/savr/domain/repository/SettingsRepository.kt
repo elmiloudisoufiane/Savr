@@ -20,4 +20,14 @@ interface SettingsRepository {
     fun setQuickSaveEnabled(enabled: Boolean)
     fun getSortOrder(): SortOrder
     fun setSortOrder(order: SortOrder)
+    fun getBackupFolderUri(): String?
+    fun setBackupFolderUri(uri: String?)
+    fun getBackupRetention(): Int
+    fun setBackupRetention(count: Int)
+    fun getLastBackupHash(): String?
+    fun setLastBackupHash(hash: String?)
+    fun getLastBackupTime(): Long
+    fun setLastBackupTime(millis: Long)
+    fun getLastBackupError(): String?
+    fun setLastBackupError(message: String?)
 }

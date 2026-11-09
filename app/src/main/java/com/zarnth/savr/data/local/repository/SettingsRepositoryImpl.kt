@@ -19,6 +19,12 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         private const val KEY_AUTO_BACKUP = "auto_backup"
         private const val KEY_QUICK_SAVE = "quick_save"
         private const val KEY_SORT_ORDER = "sort_order"
+        private const val KEY_BACKUP_FOLDER_URI = "backup_folder_uri"
+        private const val KEY_BACKUP_RETENTION = "backup_retention"
+        private const val KEY_LAST_BACKUP_HASH = "last_backup_hash"
+        private const val KEY_LAST_BACKUP_TIME = "last_backup_time"
+        private const val KEY_LAST_BACKUP_ERROR = "last_backup_error"
+        private const val DEFAULT_BACKUP_RETENTION = 7
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -81,5 +87,36 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
 
     override fun setSortOrder(order: SortOrder) {
         prefs.edit { putInt(KEY_SORT_ORDER, order.ordinal) }
+    }
+
+    override fun getBackupFolderUri(): String? = prefs.getString(KEY_BACKUP_FOLDER_URI, null)
+
+    override fun setBackupFolderUri(uri: String?) {
+        prefs.edit { if (uri == null) remove(KEY_BACKUP_FOLDER_URI) else putString(KEY_BACKUP_FOLDER_URI, uri) }
+    }
+
+    override fun getBackupRetention(): Int =
+        prefs.getInt(KEY_BACKUP_RETENTION, DEFAULT_BACKUP_RETENTION).coerceAtLeast(1)
+
+    override fun setBackupRetention(count: Int) {
+        prefs.edit { putInt(KEY_BACKUP_RETENTION, count.coerceAtLeast(1)) }
+    }
+
+    override fun getLastBackupHash(): String? = prefs.getString(KEY_LAST_BACKUP_HASH, null)
+
+    override fun setLastBackupHash(hash: String?) {
+        prefs.edit { if (hash == null) remove(KEY_LAST_BACKUP_HASH) else putString(KEY_LAST_BACKUP_HASH, hash) }
+    }
+
+    override fun getLastBackupTime(): Long = prefs.getLong(KEY_LAST_BACKUP_TIME, 0L)
+
+    override fun setLastBackupTime(millis: Long) {
+        prefs.edit { putLong(KEY_LAST_BACKUP_TIME, millis) }
+    }
+
+    override fun getLastBackupError(): String? = prefs.getString(KEY_LAST_BACKUP_ERROR, null)
+
+    override fun setLastBackupError(message: String?) {
+        prefs.edit { if (message == null) remove(KEY_LAST_BACKUP_ERROR) else putString(KEY_LAST_BACKUP_ERROR, message) }
     }
 }

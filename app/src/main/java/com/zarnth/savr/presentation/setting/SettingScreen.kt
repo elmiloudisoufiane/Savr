@@ -2,6 +2,7 @@
 
 package com.zarnth.savr.presentation.setting
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -18,7 +19,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.zarnth.savr.openChromeTab
@@ -31,6 +34,8 @@ import com.zarnth.savr.presentation.setting.components.GeneralSection
 import com.zarnth.savr.presentation.setting.components.InfoDialog
 import com.zarnth.savr.presentation.setting.components.LegalSection
 import com.zarnth.savr.presentation.setting.components.OptionSheet
+import com.zarnth.savr.presentation.setting.components.RestoreConfirmDialog
+import com.zarnth.savr.presentation.setting.components.RestoreListDialog
 import com.zarnth.savr.presentation.setting.components.RadioOptionSheet
 import com.zarnth.savr.presentation.setting.components.ThemeSection
 import com.zarnth.savr.ui.theme.ThemeMode
@@ -96,6 +101,32 @@ fun SettingScreen(
         viewModel.onEvent(SettingEvents.DismissBrowserExport)
     }
 
+    var enableAfterPick by remember { mutableStateOf(false) }
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri = result.data?.data
+        if (result.resultCode == Activity.RESULT_OK && uri != null) {
+            viewModel.onEvent(SettingEvents.BackupFolderSelected(uri, enableAfterPick))
+        }
+        enableAfterPick = false
+    }
+    val pickFolder = {
+        folderLauncher.launch(
+            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                )
+            }
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.onEvent(SettingEvents.RefreshBackups)
+    }
+
     LaunchedEffect(state.exportState) {
         if (state.exportState is ExportState.Ready) {
             exportLauncher.launch("savr_backup.json")
@@ -116,7 +147,7 @@ fun SettingScreen(
         ) {
             ThemeSection(state, viewModel)
             GeneralSection(state, viewModel)
-            DataSection(state, viewModel)
+            DataSection(state, viewModel, onPickFolder = { pickFolder() })
             CommunitySection(context)
             LegalSection(context)
             AboutSection(
@@ -127,7 +158,9 @@ fun SettingScreen(
         }
 
         LoadingProgress(
-            isLoading = state.exportState is ExportState.Loading || state.browserExportState is ExportState.Loading
+            isLoading = state.exportState is ExportState.Loading ||
+                state.browserExportState is ExportState.Loading ||
+                state.isBusy
         )
     }
 
@@ -277,8 +310,53 @@ fun SettingScreen(
 
     if (state.showAutoBackupInfoDialog) {
         AutoBackupInfoDialog(
-            onEnable = { viewModel.onEvent(SettingEvents.ConfirmAutoBackupEnable) },
+            hasFolder = state.hasBackupFolder,
+            onEnable = {
+                if (state.hasBackupFolder) {
+                    viewModel.onEvent(SettingEvents.ConfirmAutoBackupEnable)
+                } else {
+                    enableAfterPick = true
+                    viewModel.onEvent(SettingEvents.DismissAutoBackupInfoDialog)
+                    pickFolder()
+                }
+            },
             onDismiss = { viewModel.onEvent(SettingEvents.DismissAutoBackupInfoDialog) }
+        )
+    }
+
+    if (state.showRetentionSheet) {
+        RadioOptionSheet(
+            title = "Backups to keep",
+            options = listOf(3, 7, 14, 30).map { "$it backups" to it },
+            current = state.backupRetention,
+            onSelect = { viewModel.onEvent(SettingEvents.SelectRetention(it)) },
+            onDismiss = { viewModel.onEvent(SettingEvents.HideRetentionSheet) }
+        )
+    }
+
+    if (state.showRestoreList) {
+        RestoreListDialog(
+            backups = state.backups,
+            onSelect = { viewModel.onEvent(SettingEvents.RequestRestore(it)) },
+            onDismiss = { viewModel.onEvent(SettingEvents.HideRestoreList) }
+        )
+    }
+
+    val pendingRestore = state.pendingRestore
+    if (pendingRestore != null) {
+        RestoreConfirmDialog(
+            backup = pendingRestore,
+            onConfirm = { viewModel.onEvent(SettingEvents.ConfirmRestore) },
+            onDismiss = { viewModel.onEvent(SettingEvents.CancelRestore) }
+        )
+    }
+
+    val backupMessage = state.backupMessage
+    if (backupMessage != null) {
+        InfoDialog(
+            title = "Backup & restore",
+            text = backupMessage,
+            onDismiss = { viewModel.onEvent(SettingEvents.DismissBackupMessage) }
         )
     }
 }
