@@ -37,6 +37,7 @@ import com.zarnth.savr.presentation.setting.components.OptionSheet
 import com.zarnth.savr.presentation.setting.components.RestoreConfirmDialog
 import com.zarnth.savr.presentation.setting.components.RestoreListDialog
 import com.zarnth.savr.presentation.setting.components.RadioOptionSheet
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.presentation.setting.components.ThemeSection
 import com.zarnth.savr.ui.theme.ThemeMode
 import org.koin.androidx.compose.koinViewModel
@@ -176,6 +177,19 @@ fun SettingScreen(
             current = state.themeMode,
             onSelect = { viewModel.onEvent(SettingEvents.SelectTheme(it)) },
             onDismiss = { viewModel.onEvent(SettingEvents.HideThemeSheet) }
+        )
+    }
+
+    if (state.showBottomBarSheet) {
+        RadioOptionSheet(
+            title = "Bottom bar style",
+            options = listOf(
+                "Default" to BottomBarStyle.MATERIAL,
+                "iPhone style" to BottomBarStyle.IOS
+            ),
+            current = state.bottomBarStyle,
+            onSelect = { viewModel.onEvent(SettingEvents.SelectBottomBarStyle(it)) },
+            onDismiss = { viewModel.onEvent(SettingEvents.HideBottomBarSheet) }
         )
     }
 

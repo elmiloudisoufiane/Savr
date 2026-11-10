@@ -149,7 +149,8 @@ fun RootScreen(
                 if (showTopBarActions) {
                     RootBottomBar(
                         currentTab = currentTab,
-                        onTabChange = { currentTab = it }
+                        onTabChange = { currentTab = it },
+                        style = settingState.bottomBarStyle
                     )
                 }
             },

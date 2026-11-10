@@ -2,10 +2,14 @@ package com.zarnth.savr.presentation.setting
 
 import android.net.Uri
 import com.zarnth.savr.data.backup.BackupFileInfo
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.ui.theme.ThemeMode
 
 sealed class SettingEvents {
     data class SelectTheme(val themeMode: ThemeMode) : SettingEvents()
+    data class SelectBottomBarStyle(val style: BottomBarStyle) : SettingEvents()
+    object ShowBottomBarSheet : SettingEvents()
+    object HideBottomBarSheet : SettingEvents()
     object ShowThemeSheet : SettingEvents()
     object HideThemeSheet : SettingEvents()
     data class SelectTapAction(val action: TapAction) : SettingEvents()

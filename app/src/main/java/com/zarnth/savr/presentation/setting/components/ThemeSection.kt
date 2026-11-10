@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zarnth.savr.R
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.presentation.setting.SettingEvents
 import com.zarnth.savr.presentation.setting.SettingState
 import com.zarnth.savr.presentation.setting.SettingViewModel
@@ -47,4 +48,14 @@ fun ThemeSection(state: SettingState, viewModel: SettingViewModel) {
             onClick = { viewModel.onEvent(SettingEvents.ToggleDynamicColor(!state.dynamicColor)) }
         )
     }
+    Spacer(Modifier.height(4.dp))
+    SettingItem(
+        icon = R.drawable.home_icon,
+        title = "Bottom bar style",
+        subtitle = when (state.bottomBarStyle) {
+            BottomBarStyle.MATERIAL -> "Default"
+            BottomBarStyle.IOS -> "iPhone style"
+        },
+        onClick = { viewModel.onEvent(SettingEvents.ShowBottomBarSheet) }
+    )
 }

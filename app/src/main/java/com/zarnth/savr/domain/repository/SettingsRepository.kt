@@ -1,5 +1,6 @@
 package com.zarnth.savr.domain.repository
 
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.domain.model.SortOrder
 import com.zarnth.savr.presentation.setting.TapAction
 import com.zarnth.savr.presentation.setting.ViewMode
@@ -20,6 +21,8 @@ interface SettingsRepository {
     fun setQuickSaveEnabled(enabled: Boolean)
     fun getSortOrder(): SortOrder
     fun setSortOrder(order: SortOrder)
+    fun getBottomBarStyle(): BottomBarStyle
+    fun setBottomBarStyle(style: BottomBarStyle)
     fun getBackupFolderUri(): String?
     fun setBackupFolderUri(uri: String?)
     fun getBackupRetention(): Int

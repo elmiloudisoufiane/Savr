@@ -5,6 +5,7 @@ import com.zarnth.savr.domain.model.SortOrder
 import com.zarnth.savr.domain.repository.SettingsRepository
 import com.zarnth.savr.presentation.setting.TapAction
 import com.zarnth.savr.presentation.setting.ViewMode
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.ui.theme.ThemeMode
 import androidx.core.content.edit
 
@@ -19,6 +20,7 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
         private const val KEY_AUTO_BACKUP = "auto_backup"
         private const val KEY_QUICK_SAVE = "quick_save"
         private const val KEY_SORT_ORDER = "sort_order"
+        private const val KEY_BOTTOM_BAR_STYLE = "bottom_bar_style"
         private const val KEY_BACKUP_FOLDER_URI = "backup_folder_uri"
         private const val KEY_BACKUP_RETENTION = "backup_retention"
         private const val KEY_LAST_BACKUP_HASH = "last_backup_hash"
@@ -87,6 +89,15 @@ class SettingsRepositoryImpl(private val context: Context) : SettingsRepository 
 
     override fun setSortOrder(order: SortOrder) {
         prefs.edit { putInt(KEY_SORT_ORDER, order.ordinal) }
+    }
+
+    override fun getBottomBarStyle(): BottomBarStyle {
+        val ordinal = prefs.getInt(KEY_BOTTOM_BAR_STYLE, BottomBarStyle.MATERIAL.ordinal)
+        return BottomBarStyle.entries.getOrElse(ordinal) { BottomBarStyle.MATERIAL }
+    }
+
+    override fun setBottomBarStyle(style: BottomBarStyle) {
+        prefs.edit { putInt(KEY_BOTTOM_BAR_STYLE, style.ordinal) }
     }
 
     override fun getBackupFolderUri(): String? = prefs.getString(KEY_BACKUP_FOLDER_URI, null)

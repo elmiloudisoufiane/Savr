@@ -1,6 +1,7 @@
 package com.zarnth.savr.presentation.setting
 
 import com.zarnth.savr.data.backup.BackupFileInfo
+import com.zarnth.savr.domain.model.BottomBarStyle
 import com.zarnth.savr.ui.theme.ThemeMode
 
 enum class TapAction { SHOW_PREVIEW, OPEN_BROWSER, COPY_LINK }
@@ -30,6 +31,8 @@ sealed class BrowserImportState {
 
 data class SettingState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val bottomBarStyle: BottomBarStyle = BottomBarStyle.MATERIAL,
+    val showBottomBarSheet: Boolean = false,
     val showThemeSheet: Boolean = false,
     val tapAction: TapAction = TapAction.SHOW_PREVIEW,
     val showTapActionSheet: Boolean = false,

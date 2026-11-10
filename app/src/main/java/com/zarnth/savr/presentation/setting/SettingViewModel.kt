@@ -26,6 +26,7 @@ class SettingViewModel(
     private val _state = MutableStateFlow(
         SettingState(
             themeMode = settingsRepository.getThemeMode(),
+            bottomBarStyle = settingsRepository.getBottomBarStyle(),
             tapAction = settingsRepository.getTapAction(),
             dynamicColor = settingsRepository.getDynamicColor(),
             isDynamicColorSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
@@ -62,6 +63,19 @@ class SettingViewModel(
                         showThemeSheet = false
                     )
                 }
+            }
+
+            is SettingEvents.SelectBottomBarStyle -> {
+                settingsRepository.setBottomBarStyle(event.style)
+                _state.update { it.copy(bottomBarStyle = event.style, showBottomBarSheet = false) }
+            }
+
+            SettingEvents.ShowBottomBarSheet -> {
+                _state.update { it.copy(showBottomBarSheet = true) }
+            }
+
+            SettingEvents.HideBottomBarSheet -> {
+                _state.update { it.copy(showBottomBarSheet = false) }
             }
 
             SettingEvents.ShowThemeSheet -> {
